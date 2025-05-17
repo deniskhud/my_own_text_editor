@@ -1,6 +1,6 @@
-# `khud` - my own terminal written in C
+# `khud` - my own text editor written in C
 
-## Terminal features: 
+## Features: 
 
 - Open and display text files
 - Scroll through file contents
