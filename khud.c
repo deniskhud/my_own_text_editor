@@ -69,6 +69,8 @@ struct editorConfig E;
 /*** prototypes ***/
 
 void editorSetStatusMessage(const char* fmt, ...);
+void editorRefreshScreen();
+char* editorPrompt(char* prompt);
 
 /*** terminal ***/
 void die(const char* s){
@@ -232,22 +234,24 @@ void editorUpdateRow(erow* row){
 void editorInsertRow(int at, char* s, size_t len){
 	if (at < 0 || at > E.numrows) return;
 	E.row = realloc(E.row, sizeof(erow) * (E.numrows + 1));
-	memmove(&E.row[at + 1], &E.row[at], sizeof(erow) * (E.numrows - at));
 
 	E.row[at].size = len;
 	E.row[at].chars = malloc(len + 1);
 	memcpy(E.row[at].chars, s, len);
 	E.row[at].chars[len] = '\0';
+
 	E.row[at].rsize = 0;
 	E.row[at].render = NULL;
+
 	editorUpdateRow(&E.row[at]);
+
 	E.numrows++;
 	E.dirty++;
 }
 
 void editorFreeRow(erow* row) {
 	free(row->render);
-	free(row->render);
+	free(row->chars);
 }
 
 void editorDelRow(int at) {
@@ -278,7 +282,7 @@ void editorRowAppendString(erow* row, char* s, size_t len) {
 }
 
 void editorRowDelChar(erow* row, int at) {
-	if (at < 0 || at > row->size) return;
+	if (at < 0 || at >= row->size) return;
 	memmove(&row->chars[at], &row->chars[at + 1], row->size - at);
 	row->size--;
 	editorUpdateRow(row);
@@ -370,15 +374,21 @@ void editorOpen(char* filename){
 }
 
 void editorSave() {
-	if (E.filename == NULL) return;
+	if (E.filename == NULL) {
+		E.filename = editorPrompt("Save as: %s (ESC to cancel)");
+		if (E.filename == NULL) {
+			editorSetStatusMessage("Save aborted");
+			return;
+		}
+	}
 
 	int len;
 	char* buf = editorRowsToString(&len);
 
 	int fd = open(E.filename, O_RDWR | O_CREAT, 0644);
 	if (fd != -1) {
-		if (ftruncate(fd, len) == -1) {
-			if (write(fd, buf, len) == -1) {
+		if (ftruncate(fd, len) != -1) {
+			if (write(fd, buf, len) == len) {
 				close(fd);
 				free(buf);
 				E.dirty = 0;
@@ -390,7 +400,7 @@ void editorSave() {
 	}
 
 	free(buf);
-	editorSetStatusMessage("Cant save! I/O error: %s", strerror(errno));
+	editorSetStatusMessage("Cant save! I/O error %s", strerror(errno));
 }
 
 
@@ -543,6 +553,45 @@ void editorSetStatusMessage(const char* fmt, ...){
 
 /*** input ***/
 
+char* editorPrompt(char* prompt) {
+	size_t bufsize = 128;
+	char* buf = malloc(bufsize);
+
+	size_t buflen = 0;
+	buf[0] = '\0';
+
+	while (1) {
+		editorSetStatusMessage(prompt, buf);
+		editorRefreshScreen();
+
+		int c = editorReadKey();
+
+		if (c == DEL_KEY || c == CTRL_KEY('h') || c == BACKSPACE) {
+			if (buflen != 0) buf[--buflen] = '\0';
+		}
+		else if (c == '\x1b') {
+			editorSetStatusMessage("");
+			free(buf);
+			return NULL;
+		}
+		else if (c == '\r') {
+			if (buflen != 0) {
+				editorSetStatusMessage("");
+				return buf;
+			}
+		}
+
+		else if (!iscntrl(c) && c < 128) {
+			if (buflen == bufsize - 1) {
+				bufsize *= 2;
+				buf = realloc(buf, bufsize);
+			}
+			buf[buflen++] = c;
+			buf[buflen] = '\0';
+		}
+	}
+}
+
 //отвечает за движение курсора
 void editorMoveCursor(int key){
 	erow* row = (E.cursorY >= E.numrows) ? NULL : &E.row[E.cursorY];
@@ -618,17 +667,15 @@ void editorProcessKeypress(){
 		case BACKSPACE:
 		case CTRL_KEY('h'):
 		case DEL_KEY:
-			if (c == DEL_KEY) {
-				editorMoveCursor(ARROW_RIGHT);
-				editorDelChar();
-			}
+			if (c == DEL_KEY) editorMoveCursor(ARROW_RIGHT);
+			editorDelChar();
 			break;
 
 		case PAGE_UP:
 		case PAGE_DOWN:
 			{
 				if(c == PAGE_UP){
-					E.cursorY = E.rowoff;
+					E.cursorY -= E.rowoff;
 				}
 				else if(c == PAGE_DOWN){
 					E.cursorY = E.rowoff + E.screenrows - 1;
