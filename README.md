@@ -7,7 +7,8 @@
 - Move the cursor across lines and columns
 - Show a welcome message when no file is open
 - Minimal, `vim`/`nano`-like interface
-
+- Search, Save, Exit functions
+- Syntax highlighting
 
 ## Build and Run:
 
